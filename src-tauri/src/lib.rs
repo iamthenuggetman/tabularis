@@ -91,6 +91,7 @@ pub mod ssh_tunnel;
 pub mod sqlite_database;
 #[cfg(test)]
 pub mod sqlite_database_tests;
+pub mod system_theme;
 pub mod task_manager;
 pub mod theme_commands;
 pub mod theme_models;
@@ -279,6 +280,13 @@ pub fn run() {
                 &app.handle(),
                 startup_config.window_decorations.as_ref(),
             );
+
+            // Track the XDG portal color-scheme so Follow System reacts to
+            // OS dark-mode flips on Linux, where WebKitGTK's
+            // prefers-color-scheme is driven by legacy gtk-theme-name
+            // (tauri-apps/tauri#9427).
+            #[cfg(target_os = "linux")]
+            system_theme::spawn_color_scheme_watcher(app.handle().clone());
 
             // Allow the SSH tunnel code (which runs without a Tauri context)
             // to bridge askpass prompts to the frontend.
@@ -623,6 +631,7 @@ pub fn run() {
             theme_commands::delete_custom_theme,
             theme_commands::import_theme,
             theme_commands::export_theme,
+            system_theme::get_system_color_scheme,
             // Dump & Import
             dump_commands::dump_database,
             dump_commands::cancel_dump,

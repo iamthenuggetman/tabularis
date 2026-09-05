@@ -16,6 +16,16 @@ vi.mock("../../src/themes/themeUtils", () => ({
   applyThemeToCSS: vi.fn(),
 }));
 
+vi.mock("../../src/utils/systemTheme", () => ({
+  getSystemIsDark: () => Promise.resolve(systemIsDark),
+  subscribeSystemTheme: (cb: (isDark: boolean) => void) => {
+    systemThemeListeners.push(cb);
+    return Promise.resolve(() => {
+      systemThemeListeners = systemThemeListeners.filter((l) => l !== cb);
+    });
+  },
+}));
+
 // Create mock theme objects for themeRegistry mock
 const createMockTheme = (id: string, name: string): Theme => ({
   id,
@@ -130,10 +140,12 @@ vi.mock("../../src/themes/themeRegistry", () => ({
 
 let systemIsDark = false;
 let mediaListeners: Array<(e: { matches: boolean }) => void> = [];
+let systemThemeListeners: Array<(isDark: boolean) => void> = [];
 
 const fireSystemThemeChange = (isDark: boolean) => {
   systemIsDark = isDark;
   mediaListeners.forEach((l) => l({ matches: isDark }));
+  systemThemeListeners.forEach((l) => l(isDark));
 };
 
 describe("ThemeProvider", () => {
@@ -145,6 +157,7 @@ describe("ThemeProvider", () => {
     // Mock matchMedia globally
     mediaListeners = [];
     systemIsDark = false;
+    systemThemeListeners = [];
     Object.defineProperty(window, "matchMedia", {
       writable: true,
       value: (query: string) => ({
@@ -280,16 +293,8 @@ describe("ThemeProvider", () => {
   });
 
   it("should detect theme from system preferences if not set", async () => {
-    // Mock matchMedia to return dark mode
-    const matchMediaMock = vi.fn().mockReturnValue({
-      matches: true,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: matchMediaMock,
-    });
+    // The seam reports a dark OS
+    systemIsDark = true;
 
     vi.mocked(invoke).mockImplementation((cmd: string, args?: any) => {
       if (cmd === "get_config") {

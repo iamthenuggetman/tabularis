@@ -11,6 +11,7 @@ import { ThemeContext } from "./ThemeContext";
 import { themeRegistry } from "../themes/themeRegistry";
 import { applyThemeToCSS } from "../themes/themeUtils";
 import { getSystemThemeId, resolveActiveThemeId } from "../utils/themeManagement";
+import { getSystemIsDark, subscribeSystemTheme } from "../utils/systemTheme";
 import type { Theme, ThemeSettings } from "../types/theme";
 
 const DEFAULT_THEME_SETTINGS: ThemeSettings = {
@@ -85,9 +86,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
 
         // If still no theme, detect from system preferences
         if (!activeThemeId) {
-          const prefersDark = window.matchMedia(
-            "(prefers-color-scheme: dark)",
-          ).matches;
+          const prefersDark = await getSystemIsDark();
           activeThemeId = prefersDark ? "tabularis-dark" : "tabularis-light";
 
           // Save the detected theme
@@ -110,9 +109,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
         // Resolve active theme: follow-system overrides config.theme
         let systemIsDark: boolean | undefined;
         if (followSystemTheme) {
-          systemIsDark = window.matchMedia(
-            "(prefers-color-scheme: dark)",
-          ).matches;
+          systemIsDark = await getSystemIsDark();
           activeThemeId = resolveActiveThemeId(
             {
               ...DEFAULT_THEME_SETTINGS,
@@ -184,17 +181,21 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [currentTheme, isLoading]);
 
-  // Optional: Listen for system theme changes and auto-switch if using system theme
+  // React to system appearance changes while following the system. The seam
+  // delivers the OS mode from the XDG portal on Linux and the CSS media
+  // query everywhere else.
   useEffect(() => {
     if (!settings.followSystemTheme) return;
 
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = (e: MediaQueryListEvent) => {
-      const newThemeId = getSystemThemeId(e.matches, settings);
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    const applySystemMode = (systemIsDark: boolean) => {
+      const newThemeId = getSystemThemeId(systemIsDark, settings);
       const newTheme =
         allThemes.find((t) => t.id === newThemeId) ||
         themeRegistry.getPreset(
-          e.matches ? "tabularis-dark" : "tabularis-light",
+          systemIsDark ? "tabularis-dark" : "tabularis-light",
         );
       if (newTheme) {
         setCurrentTheme(newTheme);
@@ -202,8 +203,22 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
+    subscribeSystemTheme((systemIsDark) => {
+      if (!cancelled) {
+        applySystemMode(systemIsDark);
+      }
+    }).then((unsub) => {
+      if (cancelled) {
+        unsub();
+      } else {
+        unsubscribe = unsub;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [settings, allThemes]);
 
   const setTheme = useCallback(
@@ -318,9 +333,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
       if (currentTheme.id === themeId) {
         let replacement: Theme;
         if (settings.followSystemTheme) {
-          const systemIsDark = window.matchMedia(
-            "(prefers-color-scheme: dark)",
-          ).matches;
+          const systemIsDark = await getSystemIsDark();
           const targetId = getSystemThemeId(systemIsDark, {
             ...settings,
             lightThemeId,
@@ -430,9 +443,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
 
       // Follow-system on: immediately apply the theme for the current OS mode
       if (merged.followSystemTheme) {
-        const systemIsDark = window.matchMedia(
-          "(prefers-color-scheme: dark)",
-        ).matches;
+        const systemIsDark = await getSystemIsDark();
         const targetId = getSystemThemeId(systemIsDark, merged);
         const target =
           allThemes.find((t) => t.id === targetId) ||
